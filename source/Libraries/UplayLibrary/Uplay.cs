@@ -1,4 +1,4 @@
-﻿using Playnite;
+using Playnite;
 using Playnite.Common;
 using Playnite.SDK.Data;
 using Playnite.SDK.Models;
@@ -43,7 +43,7 @@ namespace UplayLibrary
             }
         }
 
-        public static string ConfigurationsCachePath
+        public static string CacheConfigurationDir
         {
             get
             {
@@ -51,10 +51,15 @@ namespace UplayLibrary
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "Ubisoft Game Launcher",
                     "cache",
-                    "configuration",
-                    "configurations");
+                    "configuration");
             }
         }
+
+        // Legacy plaintext cache (clients up to ~mid 2026).
+        public static string ConfigurationsCachePath => Path.Combine(CacheConfigurationDir, "configurations");
+
+        // Encrypted cache (Ubisoft Connect client from October 2026 onwards).
+        public static string ConfigurationsCacheVdatPath => Path.Combine(CacheConfigurationDir, "configurations.vdat");
 
         public static bool IsInstalled
         {
@@ -94,13 +99,24 @@ namespace UplayLibrary
         {
             var initErrorMessage = "Ubisoft Connect client was not initialized, please start the client at least once to generate user library data.";
             var products = new List<ProductInformation>();
-            var cachePath = ConfigurationsCachePath;
-            if (!File.Exists(cachePath))
+            Stream cacheStream;
+            if (File.Exists(ConfigurationsCacheVdatPath))
+            {
+                // New encrypted format: decrypt into memory, then feed the plaintext protobuf to the same deserializer.
+                var decrypted = UplayCacheDecryptor.DecryptFile(ConfigurationsCacheVdatPath);
+                cacheStream = new MemoryStream(decrypted);
+            }
+            else if (File.Exists(ConfigurationsCachePath))
+            {
+                // Legacy plaintext format.
+                cacheStream = File.OpenRead(ConfigurationsCachePath);
+            }
+            else
             {
                 throw new FileNotFoundException(initErrorMessage);
             }
 
-            using (var file = File.OpenRead(cachePath))
+            using (var file = cacheStream)
             {
                 var cacheData = Serializer.Deserialize<UplayCacheGameCollection>(file);
                 if (cacheData?.Games.HasItems() != true)
